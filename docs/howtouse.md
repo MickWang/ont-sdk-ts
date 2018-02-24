@@ -1,4 +1,4 @@
-# Ont SDK 说明文档
+# Ont-SDK-TS 说明文档
 
 ## 1 钱包 Wallet
 
@@ -9,7 +9,7 @@
 ```
 {
 	name: string;
-    ontid: string;
+    defaultOntid: string;
     createTime: string;
     version: string;
     scrypt: {
@@ -25,7 +25,7 @@
 
 `name` 是用户为钱包所取的名称。
 
-```ontid``` 是钱包唯一ontid。
+```defaultOntid``` 是钱包默认身份的Ont ID，可在显示时使用。
 
 ```createTime``` 是ISO格式表示的钱包的创建时间，如 : "2018-02-06T03:05:12.360Z"
 
@@ -57,7 +57,7 @@ wallet.create( name )
 
 #### 2) 创建用户的身份并添加到钱包中。
 
-用户需要提供自己的**私钥，身份的名称，密码**来创建身份。你还可以指定创建身份所需的算法对象，该对象应该符合如下结构:
+用户需要提供自己的**私钥，密码，身份的名称**来创建身份。你还可以指定创建身份所需的算法对象，该对象应该符合如下结构:
 
 ```
 {
@@ -88,7 +88,7 @@ console.log(privateKey)
 
 如果注册失败会抛出错误给用户捕获。用户可以重新尝试。
 
-如果注册成功，再将创建好的身份添加到钱包中。可以将身份的Ont ID赋值给钱包。
+如果注册成功，再将创建好的身份添加到钱包中。
 
 ```
 import {Identity} from 'Ont'
@@ -98,7 +98,6 @@ try {
 } catch(error) {
     //注册Ont ID失败
 }
-wallet.ontid = identity.ontid
 wallet.addIdentity(identity)
 ```
 
@@ -115,21 +114,28 @@ account.create( privateKey, password, name )
 wallet.addAccount(account)
 ```
 
-### 1.2 导入新的数字身份到钱包
+### 1.2 导入数字身份到钱包
 
 #### 1）无钱包时导入
 
-这种情况通常发生在用户已经拥有了一个数字身份，但此时客户端应用还没有创建用户钱包文件。此时需要先给用户创建一个空的钱包文件，然后根据用户的信息导出身份，并加入到钱包中。
+这种情况通常发生在用户已经拥有了一个数字身份，但此时客户端应用还没有创建用户钱包文件。此时需要先给用户创建一个空的钱包文件，然后根据用户的信息复原身份，并加入到钱包中。
 
 导入数字身份需要用户提供以下参数：
 
-**identityDataStr** 用户身份json格式字符串
+**identityDataStr** 用户身份json格式字符串，可以为空。
 
 **encryptedPrivateKey** 加密后的私钥 
 
 **password** 用户用来加密的密码
 
 **ontid** 用户身份唯一的Ont ID
+
+其中，**identityDataStr** 是数字身份备份成的JSON格式字符串，存储在用户可以获取的地方，比如二维码。如果没有可以传空字符串。
+
+根据传入的**identityDataStr** 是否为空字符串，导入的实现分成两种情况：
+
+1. **identityDataStr**不为空：导入的身份就是备份过的身份。
+2. **identityDataStr**为空：根据私钥和Ont ID生成新的数字身份，加入到钱包中。
 
 在导入过程中，先要检查密码和加密后的私钥是否正确，然后检查用户提供的Ont ID是否存在于本体Ontology，如果任意一种检查不通过，都会抛出相应错误让用户捕获。
 
@@ -424,20 +430,21 @@ try {
 
 ### 4.1 构造声明对象的签名
 
-根据用户输入内容构造声明对象，该声明对象里包含了签名后的数据。
+根据用户输入内容构造声明对象，然后使用私钥对声明对象进行签名，声明对象里包含了签名后的数据。
 
 ```
 import {Claim} from 'Ont'
 //@param {string} context 声明模板的标识
 //@param {object} claim 用户声明的内容
 //@param {object} metadata 声明的元数据
-//@param {string} privateKey 用户的私钥
-var claim = new Claim(context, claim, metadata, privateKey)
+var claim = new Claim(context, claim, metadata)
+//用私钥对声明进行签名
+var signedData = claim.sign(privateKey)
 //声明签名后的数据
-console.log(claim.signedData)
+console.log(signedData)
 ```
 
-## 5 交易 Transaction
+## 5 交易 Transaction 
 
 #### Transaction 数据规范
 
@@ -587,10 +594,10 @@ var transaction = Transaction.deserialize( hexstring )
 ### 6.1 构建InvokeCode类型的交易并序列化
 
 ```
-import {makeInvokeTransaction} from 'Ont'
+import {makeInvokeTransaction} from 'Ont.makeTransaction'
 
-//1.我们通过解析智能合约文件得到AbiInfo对象
-let abiInfo = AbiInfo.parseJson(JSON.stringify(json2))
+//1.我们通过解析智能合约文件得到AbiInfo对象，这里智能合约文件为json格式。
+let abiInfo = AbiInfo.parseJson(JSON.stringify(json))
 
 //2.从AbiInfo对象中获取要执行的函数。如 "RegIdByPublicKey"
 let f = abiInfo.getFunction('RegIdByPublicKey')
@@ -601,35 +608,16 @@ let p2 = new Parameter('pk', 'ByteArray', publicKey)
 f.setParamsValue(p1, p2)
 
 //4. 创建transaction对象
-let tx = makeInvokeTransaction(abiInfo.hash, f)
+//abiInfo.hash - 智能合约文件中的hash字段
+//f - 要执行的函数
+//privateKey - 用户的私钥
+let tx = makeInvokeTransaction(abiInfo.hash, f，privateKey)
 
-//5. 先序列化transaction中未签名的部分
-let unsignedData = tx.serializeUnsignedData()
-
-//6. 根据上面序列化的结果做签名，来构造program 对象，并添加到transaction对象中。
-let program = new Program()
-let signed = core.signatureData(unsignedData, privateKey)
-program.code = signed
-program.parameter = publicKey
-tx.programs = [program]
-
-//7. 序列化签名后的内容。最终交易对象序列化的结果就是两次序列化的结果拼接而成。
-let signedData = tx.serializeSignedData()
-let serialized = unsignedData + signedData
-
-```
-
-你也可以在构建完整的交易对象后，直接调用**transaction**的**serialize**方法得到最终序列化结果。
-
-```
+//5. 序列化transaction
 let serialized = tx.serialize()
 ```
 
-实际上，**serialize** 方法内部实现也是拼接两次序列化的结果。
-
-
-
-
+得到的序列化后的交易就可以发到链上。
 
 
 
